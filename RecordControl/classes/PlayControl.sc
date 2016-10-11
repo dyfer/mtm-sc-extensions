@@ -6,22 +6,23 @@ PlayControl {
 	var defname, playheadResp;
 	var <trimStart, <trimEnd, trimLength;
 	var pauseResp, resetResp;
+	var <isPlaying = false;
 
 	// synth args
 	var <rate=1, <start, <end, <resetPos=0, <replyRate=10;
 
-	*new { |path, chanDex=0, numChans, makeGui=true, server|
-		^super.newCopyArgs(path).init(chanDex, numChans, makeGui, server)
+	*new { |path, makeGui=true, server, actionWhenDone|
+		^super.newCopyArgs(path).init(makeGui, server, actionWhenDone)
 	}
 
-	init { |chanDex=0, numChans, makeGui, argServer|
+	init { |makeGui, argServer, actionWhenDone|
 		server = argServer ?? Server.default;
 
 		server.waitForBoot {
 			fork{
 				var cond = Condition();
 
-				this.loadBuffer(chanDex, numChans, cond);
+				this.loadBuffer(cond);
 				cond.wait; cond.test = false;
 
 				if (server.sampleRate != buffer.sampleRate) {
@@ -41,27 +42,16 @@ PlayControl {
 				cond.wait;
 
 				if (makeGui) {this.makeGui};
+
+				actionWhenDone !? {actionWhenDone.()}
 			}
 		}
 	}
 
-	loadBuffer { |chanDex=0, numChans, finishCondition|
-		if (numChans.isNil and: chanDex.isKindOf(Array).not) {
-			buffer = Buffer.read(server, path,
-				action: { finishCondition !? {finishCondition.test_(true).signal} }
-			);
-		} {
-			var chans;
-			chans = if(chanDex.isKindOf(Array)) {
-				chanDex
-			} {
-				(chanDex..chanDex+(numChans-1))
-			};
-
-			buffer = Buffer.readChannel(server, path, channels: chans,
-				action: { finishCondition !? {finishCondition.test_(true).signal} }
-			);
-		}
+	loadBuffer { |finishCondition|
+		buffer = Buffer.read(server, path,
+			action: { finishCondition !? {finishCondition.test_(true).signal} }
+		);
 	}
 
 	numFrames {^buffer.numFrames}
@@ -124,7 +114,10 @@ PlayControl {
 		playheadResp !? {playheadResp.free};
 
 		playheadResp = OSCFunc(
-			{ |msg| playhead = msg[3] },
+			{ |msg|
+				playhead = msg[3];
+				this.changed( \playhead );
+			},
 			'/playhead', server.addr, nil, [synth.asNodeID]
 		)
 	}
@@ -150,6 +143,8 @@ PlayControl {
 
 			}
 		};
+		isPlaying = true;
+		this.changed( \play, 1 );
 	}
 
 	busnum { ^playBus.index }
@@ -159,6 +154,7 @@ PlayControl {
 	rate_ { |rateRatio|
 		synth !? { synth.set(\rate, rateRatio) };
 		rate = rateRatio;
+		this.changed( \rate );
 	}
 	// pos in frames
 	resetPos_ { |frame|
@@ -186,12 +182,15 @@ PlayControl {
 
 
 	stop {
-		synth.isRunning.if { synth.run(false) }
+		synth.isRunning.if { synth.run(false) };
+		isPlaying = false;
+		this.changed( \play, 0 );
 	}
 
 	reset {
 		synth !? { synth.set(\t_reset, 1) };
 		playhead = resetPos; // push the playhead to reset point in case synth isn't running
+		this.changed( \playhead );
 	}
 
 	// set loop selection, normalized to trim size

@@ -1,7 +1,7 @@
 // Dependencies: SenseWorld Quark
 
 ControlPlotter {
-	// copyArgs
+	// copyArgs 
 	var <>busindex, <numChans, <plotLength, <refresh_rate, <plotMode, <overlay;
 	var <monval, <mon, <responder, <server;
 	var pFunc, pLength;
